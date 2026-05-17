@@ -3,6 +3,29 @@ from __future__ import annotations
 import pandas as pd
 
 
+def _compute_adx(frame: pd.DataFrame, length: int) -> pd.Series:
+    up_move = frame["high"].diff()
+    down_move = -frame["low"].diff()
+    plus_dm = up_move.where((up_move > down_move) & (up_move > 0), 0.0)
+    minus_dm = down_move.where((down_move > up_move) & (down_move > 0), 0.0)
+
+    prev_close = frame["close"].shift(1)
+    tr = pd.concat(
+        [
+            frame["high"] - frame["low"],
+            (frame["high"] - prev_close).abs(),
+            (frame["low"] - prev_close).abs(),
+        ],
+        axis=1,
+    ).max(axis=1)
+
+    atr = tr.ewm(alpha=1 / length, adjust=False).mean()
+    plus_di = 100 * (plus_dm.ewm(alpha=1 / length, adjust=False).mean() / atr)
+    minus_di = 100 * (minus_dm.ewm(alpha=1 / length, adjust=False).mean() / atr)
+    dx = (100 * (plus_di - minus_di).abs() / (plus_di + minus_di)).replace([pd.NA, float("inf")], 0)
+    return dx.ewm(alpha=1 / length, adjust=False).mean()
+
+
 def prepare_indicators(
     df: pd.DataFrame,
     ema_fast: int,
@@ -10,6 +33,7 @@ def prepare_indicators(
     ema_slow: int,
     atr_length: int,
     volume_avg_length: int,
+    adx_length: int = 14,
 ) -> pd.DataFrame:
     frame = df.copy()
 
@@ -36,5 +60,6 @@ def prepare_indicators(
 
     frame["volume_avg"] = frame["volume"].rolling(window=volume_avg_length).mean()
     frame["ema_fast_slope_pct"] = frame["ema_fast"].pct_change() * 100
+    frame["adx"] = _compute_adx(frame, adx_length)
 
     return frame.dropna().reset_index(drop=True)

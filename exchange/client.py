@@ -25,7 +25,7 @@ class ExchangeClient:
                 "secret": self.settings.api_secret,
                 "password": self.settings.api_password,
                 "enableRateLimit": True,
-                "options": {"defaultType": self.settings.market_type},
+                "options": {"defaultType": self._ccxt_market_type()},
             }
         )
 
@@ -35,6 +35,24 @@ class ExchangeClient:
             exchange.set_sandbox_mode(True)
 
         return exchange
+
+    def _ccxt_market_type(self) -> str:
+        market = self.settings.market_type.lower()
+        if market in {"futures", "future"}:
+            return "future"
+        return market
+
+    def supports_websocket(self) -> bool:
+        """True when a live WebSocket feed is available for this exchange."""
+        if self.settings.exchange_id == "binance":
+            return True
+        return self.supports_ccxt_watch()
+
+    def supports_ccxt_watch(self) -> bool:
+        has = getattr(self.exchange, "has", {}) or {}
+        if has.get("watchOHLCV") is True:
+            return True
+        return callable(getattr(self.exchange, "watch_ohlcv", None)) and has.get("watchOHLCV") is not False
 
     async def load_markets(self) -> None:
         await self._retry_async(self.exchange.load_markets)

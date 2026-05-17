@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import sys
 
 from alerts.dispatcher import AlertDispatcher
 from backtest import run_backtest
@@ -12,7 +14,8 @@ from utils.csv_logger import CSVTradeLogger
 from utils.logger import configure_logger
 
 
-async def _run() -> None:
+async def _run_cli() -> None:
+    """Terminal-only mode (no dashboard)."""
     settings = load_settings()
     logger = configure_logger(settings.log_level)
 
@@ -33,13 +36,31 @@ async def _run() -> None:
             alerts=AlertDispatcher(settings=settings, logger=logger),
             csv_logger=CSVTradeLogger(),
         )
-        await bot.run()
+        await bot.run_auto_loop()
     finally:
         await exchange_client.close()
 
 
+def _run_dashboard() -> None:
+    import uvicorn
+
+    host = os.getenv("DASHBOARD_HOST", "127.0.0.1")
+    port = int(os.getenv("DASHBOARD_PORT", "8000"))
+    print(f"Dashboard: http://{host}:{port}")
+    print("API docs: http://{0}:{1}/docs".format(host, port))
+    uvicorn.run("app.main:app", host=host, port=port, reload=False)
+
+
 def main() -> None:
-    asyncio.run(_run())
+    if len(sys.argv) > 1 and sys.argv[1].lower() in {"cli", "bot"}:
+        asyncio.run(_run_cli())
+        return
+    if len(sys.argv) > 1 and sys.argv[1].lower() == "backtest":
+        os.environ.setdefault("MODE", "backtest")
+        os.environ.setdefault("BACKTEST_ENABLED", "true")
+        asyncio.run(_run_cli())
+        return
+    _run_dashboard()
 
 
 if __name__ == "__main__":

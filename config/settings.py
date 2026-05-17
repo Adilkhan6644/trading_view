@@ -59,10 +59,22 @@ class Settings:
     email_app_password: str
     email_from: str
     email_to: str
+    discord_enabled: bool
+    discord_webhook_url: str
+    ntfy_enabled: bool
+    ntfy_topic: str
+    ntfy_server_url: str
     mode: str
     paper_trading_enabled: bool
     backtest_enabled: bool
     backtest_lookback_candles: int
+    data_mode: str
+    alert_on_candle_close_only: bool
+    binance_ws_market: str
+    sideways_filter_enabled: bool
+    adx_length: int
+    adx_trend_min: float
+    sideways_ema_spread_max_pct: float
 
 
 def load_settings() -> Settings:
@@ -83,7 +95,7 @@ def load_settings() -> Settings:
         log_level=os.getenv("LOG_LEVEL", "INFO").upper(),
         timezone=os.getenv("TIMEZONE", "UTC"),
         symbols=_to_list(os.getenv("SYMBOLS", ""), ["BTC/USDT", "ETH/USDT", "SOL/USDT"]),
-        timeframes=_to_list(os.getenv("TIMEFRAMES", ""), ["1m", "3m", "5m"]),
+        timeframes=_to_list(os.getenv("TIMEFRAMES", ""), ["5m"]),
         session_filter_enabled=_to_bool(os.getenv("SESSION_FILTER_ENABLED"), True),
         sessions=[s.upper() for s in _to_list(os.getenv("SESSIONS", ""), ["LONDON", "NEW_YORK"])],
         ema_fast=int(os.getenv("EMA_FAST", "8")),
@@ -107,8 +119,20 @@ def load_settings() -> Settings:
         email_app_password=os.getenv("EMAIL_APP_PASSWORD", ""),
         email_from=os.getenv("EMAIL_FROM", ""),
         email_to=os.getenv("EMAIL_TO", ""),
+        discord_enabled=_to_bool(os.getenv("DISCORD_ENABLED"), False),
+        discord_webhook_url=os.getenv("DISCORD_WEBHOOK_URL", ""),
+        ntfy_enabled=_to_bool(os.getenv("NTFY_ENABLED"), False),
+        ntfy_topic=os.getenv("NTFY_TOPIC", ""),
+        ntfy_server_url=os.getenv("NTFY_SERVER_URL", "https://ntfy.sh"),
         mode=os.getenv("MODE", "live").lower(),
         paper_trading_enabled=_to_bool(os.getenv("PAPER_TRADING_ENABLED"), False),
         backtest_enabled=_to_bool(os.getenv("BACKTEST_ENABLED"), False),
         backtest_lookback_candles=int(os.getenv("BACKTEST_LOOKBACK_CANDLES", "1200")),
+        data_mode=os.getenv("DATA_MODE", "websocket").lower(),
+        alert_on_candle_close_only=_to_bool(os.getenv("ALERT_ON_CANDLE_CLOSE_ONLY"), True),
+        binance_ws_market=os.getenv("BINANCE_WS_MARKET", "auto").lower(),
+        sideways_filter_enabled=_to_bool(os.getenv("SIDEWAYS_FILTER_ENABLED"), True),
+        adx_length=int(os.getenv("ADX_LENGTH", "14")),
+        adx_trend_min=float(os.getenv("ADX_TREND_MIN", "22")),
+        sideways_ema_spread_max_pct=float(os.getenv("SIDEWAYS_EMA_SPREAD_MAX_PCT", "0.2")),
     )

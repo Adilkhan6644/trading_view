@@ -3,7 +3,9 @@ from __future__ import annotations
 import logging
 from typing import Dict, Optional
 
+from alerts.discord_alert import DiscordAlert
 from alerts.email_alert import EmailAlert
+from alerts.ntfy_alert import NtfyAlert
 from alerts.telegram_alert import TelegramAlert
 from config.settings import Settings
 
@@ -13,9 +15,17 @@ class AlertDispatcher:
         self.logger = logger
         self.telegram: Optional[TelegramAlert] = None
         self.email: Optional[EmailAlert] = None
+        self.discord: Optional[DiscordAlert] = None
+        self.ntfy: Optional[NtfyAlert] = None
 
         if settings.telegram_enabled:
             self.telegram = TelegramAlert(settings.telegram_bot_token, settings.telegram_chat_id)
+
+        if settings.discord_enabled:
+            self.discord = DiscordAlert(settings.discord_webhook_url)
+
+        if settings.ntfy_enabled:
+            self.ntfy = NtfyAlert(settings.ntfy_topic, settings.ntfy_server_url)
 
         if settings.email_enabled:
             self.email = EmailAlert(
@@ -31,11 +41,25 @@ class AlertDispatcher:
         message = self._build_message(payload)
         subject = f"[{payload['side']}] {payload['symbol']} {payload['timeframe']}"
 
+        title = f"{payload['side']} {payload['symbol']} {payload['timeframe']}"
+
         if self.telegram:
             try:
                 await self.telegram.send(message)
             except Exception as exc:
                 self.logger.error("Telegram alert failed: %s", exc)
+
+        if self.discord:
+            try:
+                await self.discord.send(message, title=title)
+            except Exception as exc:
+                self.logger.error("Discord alert failed: %s", exc)
+
+        if self.ntfy:
+            try:
+                await self.ntfy.send(message, title=title)
+            except Exception as exc:
+                self.logger.error("ntfy alert failed: %s", exc)
 
         if self.email:
             try:

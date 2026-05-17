@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Trading Alert Dashboard</title>
+  <style>
+    :root {
+      --bg: #0b0f14;
+      --panel: #121820;
+      --border: #1e2a38;
+      --text: #e8eef5;
+      --muted: #8b9cb3;
+      --long: #22c55e;
+      --short: #ef4444;
+      --accent: #3b82f6;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: "Segoe UI", system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+    header {
+      padding: 1rem 1.5rem;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      background: linear-gradient(180deg, #10161f, var(--bg));
+    }
+    h1 { font-size: 1.25rem; font-weight: 600; }
+    .subtitle { color: var(--muted); font-size: 0.85rem; margin-top: 0.25rem; }
+    .controls { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+    button {
+      border: 1px solid var(--border);
+      background: var(--panel);
+      color: var(--text);
+      padding: 0.5rem 1rem;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 0.875rem;
+    }
+    button:hover { border-color: var(--accent); }
+    button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+    button.danger { background: #7f1d1d; border-color: #991b1b; }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 1rem;
+      padding: 1rem 1.5rem;
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1rem;
+    }
+    .card .label { color: var(--muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; }
+    .card .value { font-size: 1.5rem; font-weight: 700; margin-top: 0.35rem; }
+    .badge {
+      display: inline-block;
+      padding: 0.2rem 0.5rem;
+      border-radius: 6px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      margin-top: 0.5rem;
+    }
+    .badge.on { background: #14532d; color: var(--long); }
+    .badge.off { background: #3f1d1d; color: var(--short); }
+    .badge.neutral { background: #1e293b; color: var(--muted); }
+    main {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1rem;
+      padding: 0 1.5rem 1.5rem;
+    }
+    @media (max-width: 1100px) { main { grid-template-columns: 1fr; } }
+    section {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+    section h2 {
+      font-size: 0.9rem;
+      padding: 0.75rem 1rem;
+      border-bottom: 1px solid var(--border);
+      background: #0f141c;
+    }
+    .table-wrap { max-height: 420px; overflow: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+    th, td { padding: 0.5rem 0.75rem; text-align: left; border-bottom: 1px solid var(--border); }
+    th { color: var(--muted); font-weight: 500; position: sticky; top: 0; background: var(--panel); }
+    tr:hover td { background: #161e28; }
+    .side-long { color: var(--long); font-weight: 700; }
+    .side-short { color: var(--short); font-weight: 700; }
+    .side-sideways { color: var(--muted); font-weight: 600; }
+    .conds { display: flex; flex-wrap: wrap; gap: 4px; }
+    .cond {
+      font-size: 0.65rem;
+      padding: 2px 5px;
+      border-radius: 4px;
+      background: #1e293b;
+      color: var(--muted);
+    }
+    .cond.ok { background: #14532d; color: #86efac; }
+    .logs {
+      max-height: 200px;
+      overflow: auto;
+      padding: 0.75rem 1rem;
+      font-family: ui-monospace, monospace;
+      font-size: 0.75rem;
+      line-height: 1.5;
+    }
+    .log-line { color: var(--muted); margin-bottom: 0.25rem; }
+    .log-line.error { color: #fca5a5; }
+    .log-line.warning { color: #fcd34d; }
+    .ws-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      display: inline-block; margin-right: 6px;
+      background: var(--short);
+    }
+    .ws-dot.live { background: var(--long); box-shadow: 0 0 8px var(--long); }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>Crypto Scalping Dashboard</h1>
+      <p class="subtitle"><span class="ws-dot" id="wsDot"></span>Triple EMA + VWAP · Binance WebSocket (no REST polling)</p>
+    </div>
+    <div class="controls">
+      <button class="primary" onclick="startAuto()">Start Live Feed</button>
+      <button onclick="manualScan()">Evaluate Now</button>
+      <button class="danger" onclick="stopBot()">Stop</button>
+    </div>
+  </header>
+
+  <div class="grid" id="stats"></div>
+
+  <main>
+    <section>
+      <h2>Live Market Grid (updates on each WebSocket tick)</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Pair</th>
+              <th>TF</th>
+              <th>Price</th>
+              <th>Bias</th>
+              <th>Score</th>
+              <th>Feed</th>
+              <th>Conditions</th>
+            </tr>
+          </thead>
+          <tbody id="scansBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section>
+      <h2>Triggered Signals (LONG / SHORT)</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Side</th>
+              <th>Pair</th>
+              <th>TF</th>
+              <th>Entry</th>
+              <th>SL</th>
+              <th>TP</th>
+            </tr>
+          </thead>
+          <tbody id="signalsBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section style="grid-column: 1 / -1;">
+      <h2>Live Log</h2>
+      <div class="logs" id="logs"></div>
+    </section>
+  </main>
+
+  <script>
+    const scansBody = document.getElementById("scansBody");
+    const signalsBody = document.getElementById("signalsBody");
+    const logsEl = document.getElementById("logs");
+    const statsEl = document.getElementById("stats");
+    const wsDot = document.getElementById("wsDot");
+
+    let snapshot = { status: {}, live_scans: [], scans: [], signals: [], logs: [] };
+
+    function fmtTime(iso) {
+      if (!iso) return "—";
+      return new Date(iso).toLocaleTimeString();
+    }
+
+    function renderConditions(conds) {
+      if (!conds) return "";
+      return Object.entries(conds).map(([k, v]) =>
+        `<span class="cond ${v ? "ok" : ""}">${k.replace(/_/g, " ")}</span>`
+      ).join("");
+    }
+
+    function renderStats() {
+      const s = snapshot.status || {};
+      const mode = s.mode || "manual";
+      const running = s.running ? "Running" : "Idle";
+      const session = s.session_open ? "Open" : "Closed";
+      statsEl.innerHTML = `
+        <div class="card">
+          <div class="label">Status</div>
+          <div class="value">${running}</div>
+          <span class="badge ${s.running ? "on" : "neutral"}">${mode.toUpperCase()}</span>
+        </div>
+        <div class="card">
+          <div class="label">Exchange</div>
+          <div class="value">${s.exchange || "—"}</div>
+        </div>
+        <div class="card">
+          <div class="label">Session</div>
+          <div class="value">${session}</div>
+          <span class="badge ${s.session_open ? "on" : "off"}">${session}</span>
+        </div>
+        <div class="card">
+          <div class="label">Total Scans</div>
+          <div class="value">${s.total_scans || 0}</div>
+        </div>
+        <div class="card">
+          <div class="label">Signals</div>
+          <div class="value">${s.total_signals || 0}</div>
+        </div>
+        <div class="card">
+          <div class="label">Last Scan</div>
+          <div class="value" style="font-size:1rem">${fmtTime(s.last_scan_at)}</div>
+        </div>
+      `;
+    }
+
+    function getScanRows() {
+      const live = snapshot.live_scans || [];
+      if (live.length) return live;
+      return (snapshot.scans || []).slice(0, 80);
+    }
+
+    function renderScans() {
+      scansBody.innerHTML = getScanRows().map(row => {
+        const bias = row.bias || "NEUTRAL";
+        const cls = bias === "SIDEWAYS" ? "side-sideways"
+          : bias.includes("LONG") ? "side-long"
+          : bias.includes("SHORT") ? "side-short" : "";
+        const score = `${row.long_score || 0}/6 · ${row.short_score || 0}/6`;
+        const conds = row.long_score >= row.short_score
+          ? renderConditions(row.long_conditions)
+          : renderConditions(row.short_conditions);
+        const triggered = row.triggered ? ` ⚡ ${row.signal_side}` : "";
+        return `<tr>
+          <td>${fmtTime(row.scanned_at)}</td>
+          <td>${row.symbol}</td>
+          <td>${row.timeframe}</td>
+          <td>${Number(row.price).toFixed(4)}</td>
+          <td class="${cls}">${bias}${triggered}</td>
+          <td>${score}</td>
+          <td><span class="badge ${row.live ? "on" : "neutral"}">${row.live ? "LIVE" : (row.source || "ws").toUpperCase()}</span></td>
+          <td><div class="conds">${conds}</div></td>
+        </tr>`;
+      }).join("") || "<tr><td colspan='8'>No data — click Start Live Feed</td></tr>";
+    }
+
+    function renderSignals() {
+      signalsBody.innerHTML = (snapshot.signals || []).map(sig => {
+        const cls = sig.side === "LONG" ? "side-long" : "side-short";
+        return `<tr>
+          <td>${fmtTime(sig.timestamp)}</td>
+          <td class="${cls}">${sig.side}</td>
+          <td>${sig.symbol}</td>
+          <td>${sig.timeframe}</td>
+          <td>${sig.entry}</td>
+          <td>${sig.stop_loss}</td>
+          <td>${sig.take_profit}</td>
+        </tr>`;
+      }).join("") || "<tr><td colspan='7'>No signals yet</td></tr>";
+    }
+
+    function renderLogs() {
+      logsEl.innerHTML = (snapshot.logs || []).slice(0, 60).map(l =>
+        `<div class="log-line ${l.level.toLowerCase()}">[${fmtTime(l.timestamp)}] ${l.message}</div>`
+      ).join("") || "<div class='log-line'>Waiting for activity...</div>";
+    }
+
+    function renderAll() {
+      renderStats();
+      renderScans();
+      renderSignals();
+      renderLogs();
+    }
+
+    function applyEvent(msg) {
+      if (msg.type === "snapshot") snapshot = msg.data;
+      if (msg.type === "status") snapshot.status = msg.data;
+      if (msg.type === "live_scan") {
+        const key = msg.data.symbol + "|" + msg.data.timeframe;
+        const map = {};
+        (snapshot.live_scans || []).forEach(r => { map[r.symbol + "|" + r.timeframe] = r; });
+        map[key] = msg.data;
+        snapshot.live_scans = Object.values(map);
+      }
+      if (msg.type === "scan") {
+        const key = msg.data.symbol + "|" + msg.data.timeframe;
+        const map = {};
+        (snapshot.live_scans || []).forEach(r => { map[r.symbol + "|" + r.timeframe] = r; });
+        map[key] = msg.data;
+        snapshot.live_scans = Object.values(map);
+        snapshot.scans = [msg.data, ...(snapshot.scans || [])].slice(0, 300);
+      }
+      if (msg.type === "signal") {
+        snapshot.signals = [msg.data, ...(snapshot.signals || [])].slice(0, 100);
+      }
+      if (msg.type === "log") {
+        snapshot.logs = [msg.data, ...(snapshot.logs || [])].slice(0, 500);
+      }
+      renderAll();
+    }
+
+    function connectWs() {
+      const proto = location.protocol === "https:" ? "wss:" : "ws:";
+      const ws = new WebSocket(`${proto}//${location.host}/ws/live`);
+      ws.onopen = () => { wsDot.classList.add("live"); };
+      ws.onclose = () => {
+        wsDot.classList.remove("live");
+        setTimeout(connectWs, 2000);
+      };
+      ws.onmessage = (e) => applyEvent(JSON.parse(e.data));
+    }
+
+    async function post(path) {
+      await fetch(path, { method: "POST" });
+    }
+    async function startAuto() { await post("/api/bot/auto/start"); }
+    async function stopBot() { await post("/api/bot/stop"); }
+    async function manualScan() { await post("/api/scan/manual"); }
+
+    connectWs();
+    fetch("/api/snapshot").then(r => r.json()).then(data => {
+      snapshot = data;
+      renderAll();
+    });
+  </script>
+</body>
+</html>

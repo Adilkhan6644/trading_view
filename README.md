@@ -14,6 +14,7 @@ Professional Python crypto scalping alert bot that scans multiple pairs/timefram
 - CSV signal logging for later analysis
 - Optional backtesting mode
 - Docker ready
+- Alerts without Gmail: Telegram, Discord webhook, or ntfy push (`NOTIFICATION_SETUP.md`)
 
 ## Strategy Implemented
 
@@ -77,7 +78,7 @@ trading/
 2. Install dependencies
 3. Copy `.env.example` to `.env`
 4. Fill Telegram/Email/API settings
-5. Run bot
+5. Run the **dashboard** (recommended)
 
 Windows PowerShell:
 
@@ -88,6 +89,12 @@ pip install -r requirements.txt
 Copy-Item .env.example .env
 python main.py
 ```
+
+Open **http://127.0.0.1:8000** — use **Start Live Feed** (WebSocket, no REST polling) or **Evaluate Now**.
+
+Default data feed is **WebSocket** (`DATA_MODE=websocket`). One REST bootstrap per pair, then live stream.
+
+Terminal-only mode: `python main.py cli`
 
 ## Configuration Notes
 
