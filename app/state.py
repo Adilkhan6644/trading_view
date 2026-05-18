@@ -7,6 +7,20 @@ from datetime import datetime, timezone
 from typing import Any, Deque, Dict, List, Set
 
 
+def _json_safe(value: Any) -> Any:
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {key: _json_safe(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_json_safe(item) for item in value]
+    if isinstance(value, tuple):
+        return [_json_safe(item) for item in value]
+    if isinstance(value, deque):
+        return [_json_safe(item) for item in value]
+    return value
+
+
 @dataclass
 class BotStatus:
     running: bool = False
@@ -154,7 +168,7 @@ class BotState:
             for strategy_name, signals in self.strategy_signals.items():
                 strategy_signals_snapshot[strategy_name] = list(signals)
             
-            return {
+            snapshot = {
                 "status": asdict(self.status),
                 "live_scans": live,
                 "scans": list(self.scans),
@@ -163,3 +177,4 @@ class BotState:
                 "strategy_status": {name: asdict(status) for name, status in self.strategy_status.items()},
                 "strategy_signals": strategy_signals_snapshot,
             }
+            return _json_safe(snapshot)
