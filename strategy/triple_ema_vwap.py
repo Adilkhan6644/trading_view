@@ -28,6 +28,7 @@ class SignalResult:
 
     def to_payload(self, exchange: str) -> Dict[str, str]:
         return {
+            "strategy": "triple_ema_vwap",
             "exchange": exchange,
             "symbol": self.symbol,
             "timeframe": self.timeframe,
@@ -115,6 +116,7 @@ class TripleEMAVWAPStrategy:
             short_ready = False
 
         return {
+            "strategy_name": "triple_ema_vwap",
             "symbol": symbol,
             "timeframe": timeframe,
             "price": float(curr["close"]),

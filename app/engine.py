@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Optional
+from typing import Dict, Optional
 
 from alerts.dispatcher import AlertDispatcher
 from app.state import BotState
@@ -11,13 +11,14 @@ from config.settings import Settings
 from exchange.client import ExchangeClient
 from exchange.websocket_feed import WebSocketFeed
 from strategy.triple_ema_vwap import TripleEMAVWAPStrategy
+from strategy.ema_scalping import EMAScalpingStrategy
 from utils.csv_logger import CSVTradeLogger
 from utils.logger import configure_logger
 from utils.sessions import session_is_open
 
 
 class BotEngine:
-    """Runs the scanner via WebSocket (default) or REST polling."""
+    """Runs the scanner via WebSocket (default) or REST polling with support for multiple strategies."""
 
     def __init__(self, settings: Settings, state: BotState) -> None:
         self.settings = settings
@@ -29,25 +30,39 @@ class BotEngine:
             exchange_client=self.exchange_client,
             logger=self.logger,
         )
-        self.strategy = TripleEMAVWAPStrategy(settings=settings)
+        
+        # Initialize strategies
+        self.strategies: Dict[str, TripleEMAVWAPStrategy | EMAScalpingStrategy] = {
+            "triple_ema_vwap": TripleEMAVWAPStrategy(settings=settings),
+            "ema_scalping": EMAScalpingStrategy(settings=settings),
+        }
+        
         self.alerts = AlertDispatcher(settings=settings, logger=self.logger)
         self.csv_logger = CSVTradeLogger()
-        self.bot = TradingAlertBot(
-            settings=settings,
-            logger=self.logger,
-            exchange_client=self.exchange_client,
-            strategy=self.strategy,
-            alerts=self.alerts,
-            csv_logger=self.csv_logger,
-            state=state,
-            ws_feed=self.ws_feed,
-        )
-        self._auto_task: Optional[asyncio.Task] = None
+        
+        # Create bots for each strategy
+        self.bots: Dict[str, TradingAlertBot] = {
+            name: TradingAlertBot(
+                settings=settings,
+                logger=self.logger,
+                exchange_client=self.exchange_client,
+                strategy=strategy,
+                alerts=self.alerts,
+                csv_logger=self.csv_logger,
+                state=state,
+                ws_feed=self.ws_feed,
+                strategy_name=name,
+            )
+            for name, strategy in self.strategies.items()
+        }
+        
+        self._auto_tasks: Dict[str, asyncio.Task] = {}
         self._mode = "manual"
+        self._enabled_strategies = {"triple_ema_vwap"}  # Start with first strategy by default
 
     @property
     def is_running(self) -> bool:
-        return self._auto_task is not None and not self._auto_task.done()
+        return any(task is not None and not task.done() for task in self._auto_tasks.values())
 
     def _use_websocket(self) -> bool:
         if self.settings.data_mode == "rest":
@@ -55,30 +70,61 @@ class BotEngine:
         return WebSocketFeed.is_available(self.settings, self.exchange_client)
 
     async def initialize(self) -> None:
-        await self.exchange_client.load_markets()
-        session_open = session_is_open(
-            self.settings.session_filter_enabled,
-            self.settings.sessions,
-            self.settings.timezone,
-        )
-        data_source = "websocket" if self._use_websocket() else "rest"
-        await self.state.update_status(
-            running=False,
-            mode=self._mode,
-            session_open=session_open,
-            data_source=data_source,
-            ws_streams=self.ws_feed.stream_count if data_source == "websocket" else 0,
-            ws_connected=False,
-            exchange=self.settings.exchange_id,
-            symbols=self.settings.symbols,
-            timeframes=self.settings.timeframes,
-        )
-        msg = (
-            f"Dashboard ready | data={data_source.upper()} | "
-            f"{'WebSocket live streams' if data_source == 'websocket' else 'REST polling'} — "
-            "click Start Auto or Scan Now"
-        )
-        await self.state.add_log("INFO", msg)
+        try:
+            print("DEBUG: Initializing strategies...")
+            # Initialize state for each strategy
+            for strategy_name in self.strategies.keys():
+                await self.state.initialize_strategy(strategy_name)
+            
+            print("DEBUG: Loading markets...")
+            try:
+                await self.exchange_client.load_markets()
+            except Exception as exc:
+                await self.state.add_log("WARNING", f"Market load skipped during dashboard startup: {exc}")
+                print(f"WARNING: market load failed during startup: {exc}")
+            
+            print("DEBUG: Checking session...")
+            session_open = session_is_open(
+                self.settings.session_filter_enabled,
+                self.settings.sessions,
+                self.settings.timezone,
+            )
+            
+            print("DEBUG: Setting up data source...")
+            data_source = "websocket" if self._use_websocket() else "rest"
+            
+            print("DEBUG: Updating status...")
+            await self.state.update_status(
+                running=False,
+                mode=self._mode,
+                session_open=session_open,
+                data_source=data_source,
+                ws_streams=self.ws_feed.stream_count if data_source == "websocket" else 0,
+                ws_connected=False,
+                exchange=self.settings.exchange_id,
+                symbols=self.settings.symbols,
+                timeframes=self.settings.timeframes,
+                active_strategies=list(self._enabled_strategies),
+            )
+            
+            print("DEBUG: Enabling initial strategies...")
+            # Enable initial strategies
+            for strategy_name in self._enabled_strategies:
+                await self.state.enable_strategy(strategy_name)
+            
+            msg = (
+                f"Dashboard ready | strategies={', '.join(self._enabled_strategies)} | "
+                f"data={data_source.upper()} | "
+                f"{'WebSocket live streams' if data_source == 'websocket' else 'REST polling'} — "
+                "click Start Auto or Scan Now"
+            )
+            await self.state.add_log("INFO", msg)
+            print("DEBUG: Initialization complete!")
+        except Exception as e:
+            print(f"ERROR during initialization: {e}")
+            import traceback
+            traceback.print_exc()
+            raise
 
     async def start_auto(self) -> None:
         if self.is_running:
@@ -86,30 +132,43 @@ class BotEngine:
             return
 
         self._mode = "auto"
-        if self._use_websocket():
-            self._auto_task = asyncio.create_task(self.bot.run_websocket_loop())
-        else:
-            await self.state.add_log(
-                "WARNING",
-                f"WebSocket not available for {self.settings.exchange_id} — using REST polling.",
-            )
-            self._auto_task = asyncio.create_task(self.bot.run_auto_loop())
+        
+        # Start a task for each enabled strategy
+        for strategy_name in self._enabled_strategies:
+            bot = self.bots[strategy_name]
+            if self._use_websocket():
+                task = asyncio.create_task(bot.run_websocket_loop())
+            else:
+                await self.state.add_log(
+                    "WARNING",
+                    f"WebSocket not available for {self.settings.exchange_id} — using REST polling.",
+                )
+                task = asyncio.create_task(bot.run_auto_loop())
+            self._auto_tasks[strategy_name] = task
 
         await self.state.update_status(mode="auto", running=True)
 
     async def stop(self) -> None:
-        self.bot.stop()
+        # Stop all bots
+        for bot in self.bots.values():
+            bot.stop()
+        
         if self.ws_feed:
             await self.ws_feed.stop()
-        if self._auto_task:
-            try:
-                await asyncio.wait_for(self._auto_task, timeout=8)
-            except asyncio.TimeoutError:
-                self._auto_task.cancel()
-            self._auto_task = None
+        
+        # Wait for all tasks to finish or timeout
+        if self._auto_tasks:
+            for strategy_name, task in self._auto_tasks.items():
+                if task:
+                    try:
+                        await asyncio.wait_for(task, timeout=8)
+                    except asyncio.TimeoutError:
+                        task.cancel()
+        
+        self._auto_tasks.clear()
         self._mode = "manual"
         await self.state.update_status(mode="manual", running=False, ws_connected=False)
-        await self.state.add_log("INFO", "Scanner stopped.")
+        await self.state.add_log("INFO", "All scanners stopped.")
 
     async def manual_scan(self) -> None:
         if self.is_running:
@@ -135,27 +194,55 @@ class BotEngine:
             if not self.exchange_client.exchange.markets:
                 await self.exchange_client.load_markets()
 
-            if self._use_websocket() and self.ws_feed.store.keys():
-                await self.state.add_log("INFO", "Manual scan using cached WebSocket candle data.")
-                for symbol in self.settings.symbols:
-                    for timeframe in self.settings.timeframes:
-                        frame = self.ws_feed.store.get(symbol, timeframe)
-                        if frame is not None:
-                            await self.bot._process_frame(
-                                symbol=symbol,
-                                timeframe=timeframe,
-                                frame=frame,
-                                source="websocket",
-                                live_tick=False,
-                                allow_alerts=True,
-                            )
-            else:
-                await self.bot.run_scan_cycle()
+            # Run manual scan for all enabled strategies concurrently
+            tasks = []
+            for strategy_name in self._enabled_strategies:
+                bot = self.bots[strategy_name]
+                if self._use_websocket() and self.ws_feed.store.keys():
+                    await self.state.add_log(
+                        "INFO", 
+                        f"[{strategy_name}] Manual scan using cached WebSocket candle data."
+                    )
+                    for symbol in self.settings.symbols:
+                        for timeframe in self.settings.timeframes:
+                            frame = self.ws_feed.store.get(symbol, timeframe)
+                            if frame is not None:
+                                tasks.append(bot._process_frame(
+                                    symbol=symbol,
+                                    timeframe=timeframe,
+                                    frame=frame,
+                                    source="websocket",
+                                    live_tick=False,
+                                    allow_alerts=True,
+                                ))
+                else:
+                    tasks.append(bot.run_scan_cycle())
+            
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
         except Exception as exc:
             await self.state.add_log("ERROR", f"Manual scan error: {exc}")
             await self.state.update_status(last_error=str(exc))
         finally:
             await self.state.update_status(running=False)
+
+    async def toggle_strategy(self, strategy_name: str, enabled: bool) -> None:
+        """Enable or disable a specific strategy"""
+        if strategy_name not in self.strategies:
+            await self.state.add_log("WARNING", f"Strategy '{strategy_name}' not found")
+            return
+        
+        if enabled:
+            self._enabled_strategies.add(strategy_name)
+            await self.state.enable_strategy(strategy_name)
+            await self.state.add_log("INFO", f"Strategy '{strategy_name}' enabled")
+        else:
+            self._enabled_strategies.discard(strategy_name)
+            await self.state.disable_strategy(strategy_name)
+            await self.state.add_log("INFO", f"Strategy '{strategy_name}' disabled")
+        
+        # Update status with active strategies
+        await self.state.update_status(active_strategies=list(self._enabled_strategies))
 
     async def shutdown(self) -> None:
         await self.stop()

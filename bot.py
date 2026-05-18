@@ -28,6 +28,7 @@ class TradingAlertBot:
         csv_logger: CSVTradeLogger,
         state: Optional[BotState] = None,
         ws_feed: Optional[WebSocketFeed] = None,
+        strategy_name: str = "default",
     ) -> None:
         self.settings = settings
         self.logger = logger
@@ -37,6 +38,7 @@ class TradingAlertBot:
         self.csv_logger = csv_logger
         self.state = state
         self.ws_feed = ws_feed
+        self.strategy_name = strategy_name
         self._running = False
         self._stop_event = asyncio.Event()
 
@@ -212,7 +214,12 @@ class TradingAlertBot:
         scanned_at = datetime.now(timezone.utc).isoformat()
         signal = None
         if allow_alerts:
-            signal = self.strategy.evaluate(symbol=symbol, timeframe=timeframe, df=frame)
+            # Check if strategy has 'evaluate' method (for backward compatibility)
+            if hasattr(self.strategy, 'evaluate'):
+                signal = self.strategy.evaluate(symbol=symbol, timeframe=timeframe, df=frame)
+            # Otherwise check if build_snapshot returns signal info (for EMA scalping)
+            elif snapshot.get("signal_type"):
+                signal = snapshot
 
         scan_record = {
             **snapshot,
@@ -220,7 +227,8 @@ class TradingAlertBot:
             "source": source,
             "live": live_tick,
             "triggered": signal is not None,
-            "signal_side": signal.side if signal else None,
+            "signal_type": signal.get("signal_type") if isinstance(signal, dict) else (signal.side if signal else None),
+            "strategy": self.strategy_name,
         }
 
         if self.state:
@@ -232,37 +240,89 @@ class TradingAlertBot:
         if live_tick:
             return
 
-        status_msg = (
-            f"[{source.upper()}] {symbol} {timeframe} | price={snapshot['price']:.4f} | "
-            f"bias={snapshot['bias']} | LONG {snapshot['long_score']}/6 | SHORT {snapshot['short_score']}/6"
-        )
-        if snapshot.get("is_sideways"):
-            status_msg += f" | SIDEWAYS (ADX {snapshot.get('adx', 0):.1f}) — no signal"
-        elif signal:
-            status_msg += f" | SIGNAL {signal.side}"
-        elif snapshot["long_ready"] and snapshot["cooldown_long"]:
-            status_msg += " | LONG blocked (cooldown)"
-        elif snapshot["short_ready"] and snapshot["cooldown_short"]:
-            status_msg += " | SHORT blocked (cooldown)"
+        # Build status message
+        status_msg = f"[{self.strategy_name.upper()}] [{source.upper()}] {symbol} {timeframe}"
+        
+        if isinstance(snapshot, dict) and "long_score" in snapshot:
+            # TripleEMAVWAP format
+            status_msg += (
+                f" | price={snapshot['price']:.4f} | "
+                f"bias={snapshot['bias']} | LONG {snapshot['long_score']}/6 | SHORT {snapshot['short_score']}/6"
+            )
+            if snapshot.get("is_sideways"):
+                status_msg += f" | SIDEWAYS (ADX {snapshot.get('adx', 0):.1f}) — no signal"
+            elif signal:
+                signal_type = signal.side if hasattr(signal, 'side') else signal.get("signal_type", "UNKNOWN")
+                status_msg += f" | SIGNAL {signal_type}"
+            elif snapshot["long_ready"] and snapshot["cooldown_long"]:
+                status_msg += " | LONG blocked (cooldown)"
+            elif snapshot["short_ready"] and snapshot["cooldown_short"]:
+                status_msg += " | SHORT blocked (cooldown)"
+        elif isinstance(snapshot, dict) and snapshot.get("signal_type"):
+            # EMA Scalping format
+            status_msg += (
+                f" | price={snapshot.get('price', 0):.4f} | "
+                f"signal={snapshot.get('signal_type', 'N/A')} | "
+                f"angle={snapshot.get('ema_angle', 0):.1f}°"
+            )
 
         await self.log("INFO", status_msg)
 
         if not signal:
             return
 
-        payload = signal.to_payload(self.settings.exchange_id)
-        payload["scanned_at"] = scanned_at
-        payload["source"] = source
+        # Handle signal
+        if isinstance(signal, dict):
+            # EMA Scalping signal
+            payload = signal.copy()
+            payload["scanned_at"] = scanned_at
+            payload["source"] = source
+            payload["strategy"] = self.strategy_name
+            payload["exchange"] = self.settings.exchange_id
+            payload["side"] = payload.get("signal_type", "UNKNOWN")
+            payload["entry"] = f"{float(payload.get('price', 0)):.6f}"
 
-        await self.log(
-            "INFO",
-            f"ALERT {payload['side']} {payload['symbol']} {payload['timeframe']} "
-            f"entry={payload['entry']} sl={payload['stop_loss']} tp={payload['take_profit']}",
-        )
+            atr = float(payload.get("atr", 0) or 0)
+            if self.settings.stop_loss_mode == "percent":
+                risk_per_unit = float(payload.get("price", 0)) * (self.settings.stop_loss_percent / 100)
+            else:
+                risk_per_unit = atr * self.settings.stop_loss_atr_multiplier
+            risk_per_unit = max(risk_per_unit, 1e-9)
+            reward = risk_per_unit * self.settings.risk_reward_ratio
+
+            if payload["side"] in {"BUY", "BB"}:
+                payload["stop_loss"] = f"{float(payload.get('price', 0)) - risk_per_unit:.6f}"
+                payload["take_profit"] = f"{float(payload.get('price', 0)) + reward:.6f}"
+            else:
+                payload["stop_loss"] = f"{float(payload.get('price', 0)) + risk_per_unit:.6f}"
+                payload["take_profit"] = f"{float(payload.get('price', 0)) - reward:.6f}"
+
+            payload["ema_fast"] = f"{float(payload.get('ema_9', 0)):.6f}"
+            payload["ema_mid"] = f"{float(payload.get('ema_15', 0)):.6f}"
+            payload["ema_slow"] = f"{float(payload.get('ema_15', 0)):.6f}"
+            payload["vwap"] = f"{float(payload.get('price', 0)):.6f}"
+            
+            await self.log(
+                "INFO",
+                f"ALERT {payload.get('signal_type', 'UNKNOWN')} {payload['symbol']} {payload['timeframe']} "
+                f"price={payload.get('price', 0):.6f}",
+            )
+        else:
+            # TripleEMAVWAP signal
+            payload = signal.to_payload(self.settings.exchange_id)
+            payload["scanned_at"] = scanned_at
+            payload["source"] = source
+            payload["strategy"] = self.strategy_name
+            
+            await self.log(
+                "INFO",
+                f"ALERT {payload['side']} {payload['symbol']} {payload['timeframe']} "
+                f"entry={payload['entry']} sl={payload['stop_loss']} tp={payload['take_profit']}",
+            )
 
         self.csv_logger.log_signal(payload)
         if self.state:
-            await self.state.add_signal(payload)
+            await self.state.add_strategy_signal(self.strategy_name, payload)
         await self.alerts.send(payload)
 
     def stop(self) -> None:

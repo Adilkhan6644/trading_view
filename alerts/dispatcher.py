@@ -39,9 +39,12 @@ class AlertDispatcher:
 
     async def send(self, payload: Dict[str, str]) -> None:
         message = self._build_message(payload)
-        subject = f"[{payload['side']}] {payload['symbol']} {payload['timeframe']}"
+        side = payload.get("side") or payload.get("signal_type") or "UNKNOWN"
+        symbol = payload.get("symbol", "UNKNOWN")
+        timeframe = payload.get("timeframe", "N/A")
+        subject = f"[{side}] {symbol} {timeframe}"
 
-        title = f"{payload['side']} {payload['symbol']} {payload['timeframe']}"
+        title = f"{side} {symbol} {timeframe}"
 
         if self.telegram:
             try:
@@ -69,20 +72,28 @@ class AlertDispatcher:
 
     @staticmethod
     def _build_message(payload: Dict[str, str]) -> str:
+        side = payload.get("side") or payload.get("signal_type") or "UNKNOWN"
+        entry = payload.get("entry", payload.get("price", "N/A"))
+        stop_loss = payload.get("stop_loss", "N/A")
+        take_profit = payload.get("take_profit", "N/A")
+        ema_fast = payload.get("ema_fast", payload.get("ema_9", "N/A"))
+        ema_mid = payload.get("ema_mid", payload.get("ema_15", "N/A"))
+        ema_slow = payload.get("ema_slow", "N/A")
+        vwap = payload.get("vwap", "N/A")
         return (
             "Crypto Scalping Alert\n"
             "--------------------\n"
-            f"Exchange: {payload['exchange']}\n"
-            f"Pair: {payload['symbol']}\n"
-            f"Timeframe: {payload['timeframe']}\n"
-            f"Signal: {payload['side']}\n"
-            f"Entry: {payload['entry']}\n"
-            f"Stop Loss: {payload['stop_loss']}\n"
-            f"Take Profit: {payload['take_profit']}\n"
-            f"EMA Fast: {payload['ema_fast']}\n"
-            f"EMA Mid: {payload['ema_mid']}\n"
-            f"EMA Slow: {payload['ema_slow']}\n"
-            f"VWAP: {payload['vwap']}\n"
-            f"ATR: {payload['atr']}\n"
-            f"Timestamp: {payload['timestamp']}\n"
+            f"Exchange: {payload.get('exchange', 'N/A')}\n"
+            f"Pair: {payload.get('symbol', 'N/A')}\n"
+            f"Timeframe: {payload.get('timeframe', 'N/A')}\n"
+            f"Signal: {side}\n"
+            f"Entry: {entry}\n"
+            f"Stop Loss: {stop_loss}\n"
+            f"Take Profit: {take_profit}\n"
+            f"EMA Fast: {ema_fast}\n"
+            f"EMA Mid: {ema_mid}\n"
+            f"EMA Slow: {ema_slow}\n"
+            f"VWAP: {vwap}\n"
+            f"ATR: {payload.get('atr', 'N/A')}\n"
+            f"Timestamp: {payload.get('timestamp', 'N/A')}\n"
         )

@@ -1,7 +1,11 @@
 from __future__ import annotations
 
-import aiosmtplib
 from email.message import EmailMessage
+
+try:
+    import aiosmtplib
+except ModuleNotFoundError:
+    aiosmtplib = None
 
 
 class EmailAlert:
@@ -22,6 +26,9 @@ class EmailAlert:
         self.receiver = receiver
 
     async def send(self, subject: str, message: str) -> None:
+        if aiosmtplib is None:
+            raise RuntimeError("aiosmtplib is not installed; email alerts are unavailable")
+
         if not self.username or not self.app_password or not self.sender or not self.receiver:
             return
 

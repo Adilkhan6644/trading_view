@@ -22,6 +22,16 @@ class BotStatus:
     data_source: str = "websocket"
     ws_streams: int = 0
     ws_connected: bool = False
+    active_strategies: List[str] = field(default_factory=list)  # Strategies currently running
+
+
+@dataclass
+class StrategyStatus:
+    """Status for individual strategy"""
+    name: str
+    enabled: bool = False
+    total_signals: int = 0
+    last_signal_at: str | None = None
 
 
 class BotState:
@@ -33,6 +43,8 @@ class BotState:
         self.signals: Deque[Dict[str, Any]] = deque(maxlen=max_signals)
         self.logs: Deque[Dict[str, Any]] = deque(maxlen=max_logs)
         self.live_scans: Dict[str, Dict[str, Any]] = {}
+        self.strategy_status: Dict[str, StrategyStatus] = {}  # Per-strategy status
+        self.strategy_signals: Dict[str, Deque[Dict[str, Any]]] = {}  # Per-strategy signal history
         self._lock = asyncio.Lock()
         self._ws_clients: Set[Any] = set()
 
@@ -82,6 +94,45 @@ class BotState:
     def unregister_ws(self, websocket: Any) -> None:
         self._ws_clients.discard(websocket)
 
+    async def initialize_strategy(self, strategy_name: str) -> None:
+        """Initialize tracking for a new strategy"""
+        async with self._lock:
+            if strategy_name not in self.strategy_status:
+                self.strategy_status[strategy_name] = StrategyStatus(name=strategy_name)
+                self.strategy_signals[strategy_name] = deque(maxlen=100)
+
+    async def add_strategy_signal(self, strategy_name: str, signal: Dict[str, Any]) -> None:
+        """Add signal to strategy-specific history"""
+        async with self._lock:
+            if strategy_name not in self.strategy_signals:
+                self.strategy_signals[strategy_name] = deque(maxlen=100)
+            self.strategy_signals[strategy_name].appendleft(signal)
+            if strategy_name in self.strategy_status:
+                self.strategy_status[strategy_name].total_signals += 1
+                self.strategy_status[strategy_name].last_signal_at = signal.get("timestamp")
+        # Also add to global signals
+        await self.add_signal({**signal, "strategy": strategy_name})
+
+    async def enable_strategy(self, strategy_name: str) -> None:
+        """Enable a strategy"""
+        await self.initialize_strategy(strategy_name)
+        async with self._lock:
+            if strategy_name in self.strategy_status:
+                self.strategy_status[strategy_name].enabled = True
+            if strategy_name not in self.status.active_strategies:
+                self.status.active_strategies.append(strategy_name)
+        await self.broadcast({"type": "strategy_enabled", "data": {"strategy": strategy_name}})
+
+    async def disable_strategy(self, strategy_name: str) -> None:
+        """Disable a strategy"""
+        async with self._lock:
+            if strategy_name in self.strategy_status:
+                self.strategy_status[strategy_name].enabled = False
+            if strategy_name in self.status.active_strategies:
+                self.status.active_strategies.remove(strategy_name)
+        await self.broadcast({"type": "strategy_disabled", "data": {"strategy": strategy_name}})
+
+
     async def broadcast(self, message: Dict[str, Any]) -> None:
         dead: List[Any] = []
         for ws in list(self._ws_clients):
@@ -98,10 +149,17 @@ class BotState:
                 self.live_scans.values(),
                 key=lambda row: (row.get("symbol", ""), row.get("timeframe", "")),
             )
+            # Build strategy-specific signal lists
+            strategy_signals_snapshot = {}
+            for strategy_name, signals in self.strategy_signals.items():
+                strategy_signals_snapshot[strategy_name] = list(signals)
+            
             return {
                 "status": asdict(self.status),
                 "live_scans": live,
                 "scans": list(self.scans),
                 "signals": list(self.signals),
                 "logs": list(self.logs),
+                "strategy_status": {name: asdict(status) for name, status in self.strategy_status.items()},
+                "strategy_signals": strategy_signals_snapshot,
             }

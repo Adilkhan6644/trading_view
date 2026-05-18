@@ -8,6 +8,8 @@ from typing import Any, Dict
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi import HTTPException
+from pathlib import Path
 
 from app.engine import BotEngine
 from app.security import DashboardAuthMiddleware
@@ -72,6 +74,38 @@ async def get_scans(limit: int = 50) -> Dict[str, Any]:
     return {"scans": snap["scans"][:limit]}
 
 
+@app.get("/api/scans/by_strategy")
+async def get_scans_by_strategy(limit: int = 50) -> Dict[str, Any]:
+    """Return live scans grouped by strategy name with conditions separated"""
+    snap = await state.snapshot()
+    scans = snap.get("live_scans", {})
+    
+    grouped = {"triple_ema_vwap": [], "ema_scalping": []}
+    
+    for scan_data in scans.values():
+        strategy = scan_data.get("strategy_name", "unknown")
+        if strategy in grouped:
+            grouped[strategy].append(scan_data)
+    
+    # Sort each strategy's scans by symbol and limit
+    for strategy in grouped:
+        grouped[strategy] = sorted(
+            grouped[strategy],
+            key=lambda x: (x.get("symbol", ""), x.get("timeframe", ""))
+        )[:limit]
+    
+    return {
+        "triple_ema_vwap": {
+            "name": "Triple EMA + VWAP Scalp",
+            "scans": grouped["triple_ema_vwap"]
+        },
+        "ema_scalping": {
+            "name": "EMA Angle 5m",
+            "scans": grouped["ema_scalping"]
+        }
+    }
+
+
 @app.get("/api/signals")
 async def get_signals(limit: int = 50) -> Dict[str, Any]:
     snap = await state.snapshot()
@@ -100,6 +134,65 @@ async def manual_scan() -> Dict[str, str]:
         return {"status": "error", "message": "Engine not ready"}
     await engine.manual_scan()
     return {"status": "ok", "message": "Manual scan completed"}
+
+
+@app.post("/api/strategy/{strategy_name}/enable")
+async def enable_strategy(strategy_name: str) -> Dict[str, str]:
+    if not engine:
+        return {"status": "error", "message": "Engine not ready"}
+    await engine.toggle_strategy(strategy_name, enabled=True)
+    return {"status": "ok", "message": f"Strategy '{strategy_name}' enabled"}
+
+
+@app.post("/api/strategy/{strategy_name}/disable")
+async def disable_strategy(strategy_name: str) -> Dict[str, str]:
+    if not engine:
+        return {"status": "error", "message": "Engine not ready"}
+    await engine.toggle_strategy(strategy_name, enabled=False)
+    return {"status": "ok", "message": f"Strategy '{strategy_name}' disabled"}
+
+
+@app.get("/api/strategies")
+async def get_strategies() -> Dict[str, Any]:
+    if not engine:
+        return {"strategies": []}
+    snap = await state.snapshot()
+    return {
+        "strategies": list(engine.strategies.keys()),
+        "enabled": list(engine._enabled_strategies),
+        "status": snap.get("strategy_status", {}),
+    }
+
+
+# Serve strategy documentation from repository folder `strategy_docs`
+STRATEGY_DOCS_DIR = Path(__file__).parent.parent / "strategy_docs"
+
+
+@app.get("/api/strategy_docs")
+async def list_strategy_docs() -> Dict[str, Any]:
+    base = STRATEGY_DOCS_DIR
+    if not base.exists():
+        return {"strategies": []}
+    result = []
+    for d in sorted([p for p in base.iterdir() if p.is_dir()], key=lambda p: p.name):
+        files = [f.name for f in sorted([f for f in d.iterdir() if f.is_file()], key=lambda p: p.name)]
+        result.append({"name": d.name, "files": files})
+    return {"strategies": result}
+
+
+@app.get("/api/strategy_docs/{strategy}/{file_name}")
+async def get_strategy_file(strategy: str, file_name: str) -> Dict[str, str]:
+    base = STRATEGY_DOCS_DIR
+    candidate = base / strategy / file_name
+    try:
+        # Prevent path traversal
+        candidate.resolve().relative_to(base.resolve())
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid path")
+    if not candidate.exists() or not candidate.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+    content = candidate.read_text(encoding="utf-8")
+    return {"name": file_name, "content": content}
 
 
 @app.websocket("/ws/live")

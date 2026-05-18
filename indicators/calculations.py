@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 import pandas as pd
 
 
@@ -63,3 +65,50 @@ def prepare_indicators(
     frame["adx"] = _compute_adx(frame, adx_length)
 
     return frame.dropna().reset_index(drop=True)
+
+
+def calculate_ema_angle(
+    df: pd.DataFrame, 
+    ema_col: str = "ema_fast", 
+    periods: int = 5
+) -> float:
+    """
+    Calculate the angle of an EMA in degrees.
+    
+    Args:
+        df: DataFrame with EMA column
+        ema_col: Name of EMA column (e.g., 'ema_fast')
+        periods: Number of periods to use for angle calculation
+    
+    Returns:
+        Angle in degrees (-90 to +90)
+        Positive = uptrend, Negative = downtrend
+    """
+    if len(df) < periods or ema_col not in df.columns:
+        return 0.0
+    
+    ema_values = df[ema_col].tail(periods).values
+    
+    # Calculate using linear regression slope
+    x = list(range(periods))
+    y = ema_values.tolist()
+    
+    # Calculate slope
+    n = len(x)
+    mean_x = sum(x) / n
+    mean_y = sum(y) / n
+    
+    numerator = sum((x[i] - mean_x) * (y[i] - mean_y) for i in range(n))
+    denominator = sum((x[i] - mean_x) ** 2 for i in range(n))
+    
+    if denominator == 0:
+        return 0.0
+    
+    slope = numerator / denominator
+    
+    # Convert slope to angle in degrees
+    # Use atan to get angle, then multiply by (180/pi) to convert to degrees
+    angle_rad = math.atan(slope)
+    angle_deg = math.degrees(angle_rad)
+    
+    return angle_deg

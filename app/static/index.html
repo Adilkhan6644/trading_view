@@ -21,6 +21,8 @@
       background: var(--bg);
       color: var(--text);
       min-height: 100vh;
+      display: flex;
+      flex-direction: column;
     }
     header {
       padding: 1rem 1.5rem;
@@ -47,6 +49,96 @@
     button:hover { border-color: var(--accent); }
     button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
     button.danger { background: #7f1d1d; border-color: #991b1b; }
+    button.small { padding: 0.3rem 0.6rem; font-size: 0.7rem; }
+    button.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+    
+    .container {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
+    
+    .sidebar {
+      width: 200px;
+      background: var(--panel);
+      border-right: 1px solid var(--border);
+      overflow-y: auto;
+      padding: 1rem;
+    }
+    
+    .sidebar h3 {
+      font-size: 0.9rem;
+      text-transform: uppercase;
+      color: var(--muted);
+      letter-spacing: 0.05em;
+      margin-bottom: 0.75rem;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 0.5rem;
+    }
+    
+    .strategy-list {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+    
+    .strategy-item {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.75rem;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+    
+    .strategy-item:hover {
+      border-color: var(--accent);
+      background: #0f1418;
+    }
+    
+    .strategy-item.active {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
+    
+    .strategy-name {
+      font-weight: 600;
+      font-size: 0.85rem;
+      margin-bottom: 0.3rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    
+    .strategy-status {
+      font-size: 0.7rem;
+      color: var(--muted);
+    }
+    
+    .strategy-item.active .strategy-status {
+      color: rgba(255,255,255,0.7);
+    }
+    
+    .status-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--short);
+    }
+    
+    .strategy-item.active .status-dot,
+    .status-dot.enabled {
+      background: var(--long);
+    }
+    
+    .main-content {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    
     .grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
@@ -77,6 +169,7 @@
       grid-template-columns: 1fr 1fr;
       gap: 1rem;
       padding: 0 1.5rem 1.5rem;
+      overflow-y: auto;
     }
     @media (max-width: 1100px) { main { grid-template-columns: 1fr; } }
     section {
@@ -131,7 +224,7 @@
   <header>
     <div>
       <h1>Crypto Scalping Dashboard</h1>
-      <p class="subtitle"><span class="ws-dot" id="wsDot"></span>Triple EMA + VWAP · Binance WebSocket (no REST polling)</p>
+      <p class="subtitle"><span class="ws-dot" id="wsDot"></span>Multi-Strategy · Binance WebSocket</p>
     </div>
     <div class="controls">
       <button class="primary" onclick="startAuto()">Start Live Feed</button>
@@ -140,55 +233,64 @@
     </div>
   </header>
 
-  <div class="grid" id="stats"></div>
+  <div class="container">
+    <div class="sidebar">
+      <h3>Strategies</h3>
+      <div class="strategy-list" id="strategyList"></div>
+    </div>
 
-  <main>
-    <section>
-      <h2>Live Market Grid (updates on each WebSocket tick)</h2>
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Time</th>
-              <th>Pair</th>
-              <th>TF</th>
-              <th>Price</th>
-              <th>Bias</th>
-              <th>Score</th>
-              <th>Feed</th>
-              <th>Conditions</th>
-            </tr>
-          </thead>
-          <tbody id="scansBody"></tbody>
-        </table>
-      </div>
-    </section>
+    <div class="main-content">
+      <div class="grid" id="stats"></div>
 
-    <section>
-      <h2>Triggered Signals (LONG / SHORT)</h2>
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Time</th>
-              <th>Side</th>
-              <th>Pair</th>
-              <th>TF</th>
-              <th>Entry</th>
-              <th>SL</th>
-              <th>TP</th>
-            </tr>
-          </thead>
-          <tbody id="signalsBody"></tbody>
-        </table>
-      </div>
-    </section>
+      <main>
+        <section>
+          <h2>Live Market Grid (updates on each WebSocket tick)</h2>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Time</th>
+                  <th>Pair</th>
+                  <th>TF</th>
+                  <th>Price</th>
+                  <th>Bias</th>
+                  <th>Score</th>
+                  <th>Feed</th>
+                  <th>Conditions</th>
+                </tr>
+              </thead>
+              <tbody id="scansBody"></tbody>
+            </table>
+          </div>
+        </section>
 
-    <section style="grid-column: 1 / -1;">
-      <h2>Live Log</h2>
-      <div class="logs" id="logs"></div>
-    </section>
-  </main>
+        <section>
+          <h2>Triggered Signals (LONG / SHORT)</h2>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Time</th>
+                  <th>Side</th>
+                  <th>Pair</th>
+                  <th>TF</th>
+                  <th>Entry</th>
+                  <th>SL</th>
+                  <th>TP</th>
+                </tr>
+              </thead>
+              <tbody id="signalsBody"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section style="grid-column: 1 / -1;">
+          <h2>Live Log</h2>
+          <div class="logs" id="logs"></div>
+        </section>
+      </main>
+    </div>
+  </div>
 
   <script>
     const scansBody = document.getElementById("scansBody");
@@ -196,8 +298,11 @@
     const logsEl = document.getElementById("logs");
     const statsEl = document.getElementById("stats");
     const wsDot = document.getElementById("wsDot");
+    const strategyList = document.getElementById("strategyList");
 
-    let snapshot = { status: {}, live_scans: [], scans: [], signals: [], logs: [] };
+    let snapshot = { status: {}, live_scans: [], scans: [], signals: [], logs: [], strategy_status: {}, strategy_signals: {} };
+    let activeStrategy = null;
+    let availableStrategies = [];
 
     function fmtTime(iso) {
       if (!iso) return "—";
@@ -211,11 +316,48 @@
       ).join("");
     }
 
+    function renderStrategies() {
+      const strategies = availableStrategies || [];
+      const enabled = snapshot.status?.active_strategies || [];
+      
+      if (strategies.length === 0) {
+        strategyList.innerHTML = '<div style="color: var(--muted); font-size: 0.8rem; padding: 1rem; text-align: center;">Loading strategies...</div>';
+        return;
+      }
+      
+      strategyList.innerHTML = strategies.map(strategy => {
+        const isEnabled = enabled.includes(strategy);
+        const isActive = activeStrategy === strategy;
+        const displayName = strategy === "triple_ema_vwap" ? "Triple EMA + VWAP" : 
+                           strategy === "ema_scalping" ? "EMA Scalping" : strategy;
+        
+        return `
+          <div class="strategy-item ${isActive ? 'active' : ''}" onclick="selectStrategy('${strategy}')">
+            <div class="strategy-name">
+              <span class="status-dot ${isEnabled ? 'enabled' : ''}"></span>
+              ${displayName}
+            </div>
+            <div class="strategy-status">${isEnabled ? "Enabled" : "Disabled"}</div>
+            <div style="display: flex; gap: 0.3rem; margin-top: 0.5rem;">
+              <button class="small ${isEnabled ? 'active' : ''}" onclick="toggleStrategy('${strategy}', true); event.stopPropagation();">EN</button>
+              <button class="small danger" onclick="toggleStrategy('${strategy}', false); event.stopPropagation();">DIS</button>
+            </div>
+          </div>
+        `;
+      }).join("");
+    }
+
     function renderStats() {
       const s = snapshot.status || {};
       const mode = s.mode || "manual";
       const running = s.running ? "Running" : "Idle";
       const session = s.session_open ? "Open" : "Closed";
+      
+      let activeStrategySignals = 0;
+      if (activeStrategy && snapshot.strategy_status?.[activeStrategy]) {
+        activeStrategySignals = snapshot.strategy_status[activeStrategy].total_signals || 0;
+      }
+      
       statsEl.innerHTML = `
         <div class="card">
           <div class="label">Status</div>
@@ -243,6 +385,10 @@
           <div class="label">Last Scan</div>
           <div class="value" style="font-size:1rem">${fmtTime(s.last_scan_at)}</div>
         </div>
+        <div class="card">
+          <div class="label">Active Strategies</div>
+          <div class="value">${(s.active_strategies || []).length}</div>
+        </div>
       `;
     }
 
@@ -262,7 +408,7 @@
         const conds = row.long_score >= row.short_score
           ? renderConditions(row.long_conditions)
           : renderConditions(row.short_conditions);
-        const triggered = row.triggered ? ` ⚡ ${row.signal_side}` : "";
+        const triggered = row.triggered ? ` ⚡ ${row.signal_side || row.signal_type}` : "";
         return `<tr>
           <td>${fmtTime(row.scanned_at)}</td>
           <td>${row.symbol}</td>
@@ -278,15 +424,16 @@
 
     function renderSignals() {
       signalsBody.innerHTML = (snapshot.signals || []).map(sig => {
-        const cls = sig.side === "LONG" ? "side-long" : "side-short";
+        const side = sig.side || sig.signal_type || "UNKNOWN";
+        const cls = side === "LONG" || side === "BUY" ? "side-long" : side === "SELL" ? "side-short" : "";
         return `<tr>
           <td>${fmtTime(sig.timestamp)}</td>
-          <td class="${cls}">${sig.side}</td>
+          <td class="${cls}">${side}</td>
           <td>${sig.symbol}</td>
           <td>${sig.timeframe}</td>
-          <td>${sig.entry}</td>
-          <td>${sig.stop_loss}</td>
-          <td>${sig.take_profit}</td>
+          <td>${sig.entry || sig.price || "—"}</td>
+          <td>${sig.stop_loss || "—"}</td>
+          <td>${sig.take_profit || "—"}</td>
         </tr>`;
       }).join("") || "<tr><td colspan='7'>No signals yet</td></tr>";
     }
@@ -298,15 +445,44 @@
     }
 
     function renderAll() {
+      renderStrategies();
       renderStats();
       renderScans();
       renderSignals();
       renderLogs();
     }
 
+    function selectStrategy(strategy) {
+      activeStrategy = strategy;
+      renderAll();
+    }
+
+    async function toggleStrategy(strategy, enabled) {
+      const action = enabled ? "enable" : "disable";
+      await fetch(`/api/strategy/${strategy}/${action}`, { method: "POST" });
+    }
+
     function applyEvent(msg) {
-      if (msg.type === "snapshot") snapshot = msg.data;
+      if (msg.type === "snapshot") {
+        snapshot = msg.data;
+        if (!activeStrategy && msg.data.strategy_status) {
+          const strategies = Object.keys(msg.data.strategy_status);
+          if (strategies.length > 0) {
+            activeStrategy = strategies[0];
+          }
+        }
+      }
       if (msg.type === "status") snapshot.status = msg.data;
+      if (msg.type === "strategy_enabled" || msg.type === "strategy_disabled") {
+        // Refetch strategies
+        fetch("/api/strategies").then(r => r.json()).then(data => {
+          availableStrategies = data.strategies || [];
+          if (snapshot.status) {
+            snapshot.status.active_strategies = data.enabled || [];
+          }
+          renderAll();
+        });
+      }
       if (msg.type === "live_scan") {
         const key = msg.data.symbol + "|" + msg.data.timeframe;
         const map = {};
@@ -350,10 +526,32 @@
     async function manualScan() { await post("/api/scan/manual"); }
 
     connectWs();
-    fetch("/api/snapshot").then(r => r.json()).then(data => {
-      snapshot = data;
+    
+    // Fetch initial data
+    (async () => {
+      try {
+        const snapshotResp = await fetch("/api/snapshot");
+        const snapshotData = await snapshotResp.json();
+        snapshot = snapshotData;
+      } catch (e) {
+        console.error("Failed to fetch snapshot:", e);
+      }
+      
+      try {
+        const stratsResp = await fetch("/api/strategies");
+        const stratsData = await stratsResp.json();
+        availableStrategies = stratsData.strategies || [];
+        if (stratsData.strategies && stratsData.strategies.length > 0) {
+          activeStrategy = stratsData.strategies[0];
+        }
+      } catch (e) {
+        console.error("Failed to fetch strategies:", e);
+        availableStrategies = ["triple_ema_vwap", "ema_scalping"];
+        activeStrategy = "triple_ema_vwap";
+      }
+      
       renderAll();
-    });
+    })();
   </script>
 </body>
 </html>
