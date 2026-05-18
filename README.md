@@ -96,6 +96,14 @@ Default data feed is **WebSocket** (`DATA_MODE=websocket`). One REST bootstrap p
 
 Terminal-only mode: `python main.py cli`
 
+## Docker
+
+```powershell
+docker compose up -d --build
+```
+
+Open http://localhost:8000 — see `DOCKER.md` for full steps.
+
 ## Configuration Notes
 
 - `EXCHANGE_ID`: `binance` or `bybit`

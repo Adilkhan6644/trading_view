@@ -10,6 +10,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.engine import BotEngine
+from app.security import DashboardAuthMiddleware
 from app.state import BotState
 from config.settings import load_settings
 
@@ -40,6 +41,7 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+app.add_middleware(DashboardAuthMiddleware)
 
 if STATIC_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")

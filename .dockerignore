@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.git/
+.gitignore
+.env
+logs/
+data/alerts.csv
+*.md
+.cursor/
+terminals/

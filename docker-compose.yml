@@ -5,6 +5,12 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    environment:
+      # Required in Docker so the dashboard is reachable from your browser
+      DASHBOARD_HOST: "0.0.0.0"
+      DASHBOARD_PORT: "8000"
+    ports:
+      - "8000:8000"
     volumes:
       - ./logs:/app/logs
       - ./data:/app/data
